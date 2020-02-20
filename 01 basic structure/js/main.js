@@ -12,6 +12,9 @@ var GameState = {
     this.game.physics.arcade.gravity.y = 1000;
   
     this.cursors = this.game.input.keyboard.createCursorKeys();
+
+    this.game.world.setBounds(0, 0, 360, 700);
+
     this.RUNNING_SPEED = 180;
     this.JUMPING_SPEED = 650;
   },
@@ -28,55 +31,99 @@ var GameState = {
 
     this.load.spritesheet('player', 'assets/images/player_spritesheet.png', 28, 30, 5, 1, 1);    
     this.load.spritesheet('fire', 'assets/images/fire_spritesheet.png', 20, 21, 2, 1, 1);      
+  
+    this.load.text('level', 'assets/data/level.json')
+  
   },
   //executed after everything is loaded
   create: function() {    
 
-    this.ground = this.add.sprite(0, 500, 'ground');
+    this.ground = this.add.sprite(0, 638, 'ground');
     this.game.physics.arcade.enable(this.ground);
     this.ground.body.allowGravity = false;
-    this.ground.body.immovable = true;
- 
-    var platformData = [
-      {"x":0, "y":430},
-      {"x":45, "y":560},
-      {"x":90, "y":290},
-      {"x":0, "y":140}
-    ];
+    this.ground.body.immovable = true
 
+    //parse the file
+    this.levelData = JSON.parse(this.game.cache.getText('level'))
+
+    console.log(this.levelData)
 
     this.platforms = this.add.group();
     this.platforms.enableBody = true;
 
-    platformData.forEach(function(element){
+    this.levelData.platformData.forEach(function(element){
       this.platforms.create(element.x, element.y, 'platform')
     }, this);
 
     this.platforms.setAll('body.immovable', true);
     this.platforms.setAll('body.allowGravity', false);
 
+    //fire elements
+    this.fires = this.add.group();
+    this.fires.enableBody = true;
+
+    var fire;
+    this.levelData.fireData.forEach(function(element){
+      fire = this.fires.create(element.x, element.y, 'fire');
+      fire.animations.add('fire', [0, 1], 4, true);
+      fire.play('fire'); 
+    }, this);
+
+    this.fires.setAll('body.allowGravity', false);
+
+    //goal
+    this.goal = this.add.sprite(this.levelData.goal.x, this.levelData.goal.y, 'goal')
+    this.game.physics.arcade.enable(this.goal);
+    this.goal.body.allowGravity = false;
 
     //create player
-    this.player = this.add.sprite(100, 200, 'player', 3);
+    this.player = this.add.sprite(10, 545, 'player', 3);
     this.player.anchor.setTo(0.5);
     this.player.animations.add('walking', [0, 1, 2, 1], 6, true);
+
     //this.player.play('walking');
     this.game.physics.arcade.enable(this.player)
     this.player.customParams = {};
 
+    this.game.camera.follow(this.player);
+
     this.createOnscreenControls();
+
+    this.barrels = this.add.group();
+    this.barrels.enableBody = true;
+
+    this.createBarrel();
+    this.barrelsCreator = this.game.time.events.loop(Phaser.Timer.SECOND * this.levelData.barrelFrequency, this.createBarrel, this)
 
   },
   update: function() {
     this.game.physics.arcade.collide(this.player, this.ground)
     this.game.physics.arcade.collide(this.player, this.platforms)
 
+    this.game.physics.arcade.collide(this.barrels, this.ground)
+    this.game.physics.arcade.collide(this.barrels, this.platforms)
+
+    this.game.physics.arcade.overlap(this.player, this.fires, this.killPlayer)
+    this.game.physics.arcade.overlap(this.player, this.barrels, this.killPlayer)
+    this.game.physics.arcade.overlap(this.player, this.goal, this.win)
+
+
     this.player.body.velocity.x = 0;
 
     if(this.cursors.left.isDown || this.player.customParams.isMovingLeft){
       this.player.body.velocity.x = -this.RUNNING_SPEED;
-    } else if(this.cursors.right.isDown || this.player.customParams.isMovingRight){
+      this.player.scale.setTo(1, 1);
+      this.player.play('walking');
+    } 
+    else if(this.cursors.right.isDown || this.player.customParams.isMovingRight){
       this.player.body.velocity.x = this.RUNNING_SPEED;
+      this.player.scale.setTo(-1, 1);
+      this.player.play('walking');
+
+    }
+    else {
+      this.player.animations.stop();
+      this.player.frame = 3;  
     }
 
     if ((this.cursors.up.isDown || this.player.customParams.mustJump) && this.player.body.touching.down){
@@ -84,6 +131,13 @@ var GameState = {
       this.player.customParams.mustJump = false;
     }
 
+
+
+    this.barrels.forEach(function(element){
+      if(element.x < 10 && element.y > 600){
+        element.kill()
+      }
+    }, this)
   },
   createOnscreenControls: function(){
     this.leftArrow = this.add.button(20 , 535, 'arrowButton');
@@ -93,6 +147,11 @@ var GameState = {
     this.leftArrow.alpha = 0.5;
     this.rightArrow.alpha = 0.5;
     this.actionButton.alpha = 0.5;
+
+    this.leftArrow.fixedToCamera = true;
+    this.rightArrow.fixedToCamera = true;
+    this.actionButton.fixedToCamera = true;
+
 
     /*action button*/
     this.actionButton.events.onInputDown.add(function(){
@@ -143,8 +202,26 @@ var GameState = {
 
 
   },
-  landed: function(player, ground){
-    //console.log('landed')
+  killPlayer: function(player, fire){
+    console.log('auch!')
+    game.state.start('GameState')
+  },
+  win: function(player, goal){
+    alert('you win!')
+    game.state.start('GameState')
+  },
+  createBarrel: function(){
+    var barrel = this.barrels.getFirstExists(false);
+
+    if(!barrel){
+      barrel = this.barrels.create(0, 0, 'barrel');
+    }
+
+    barrel.body.collideWorldBounds = true;
+    barrel.body.bounce.set(1, 0);
+
+    barrel.reset(this.levelData.goal.x, this.levelData.goal.y);
+    barrel.body.velocity.x = this.levelData.barrelSpeed;
   }
   
 };
